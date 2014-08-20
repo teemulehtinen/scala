@@ -42,9 +42,14 @@ class StandardCompileClient extends HasCompileSocket with CompileOutputCommon {
     info(fscArgs.mkString("[Transformed arguments: ", " ", "]"))
     info(vmArgs.mkString("[VM arguments: ", " ", "]"))
 
-    val socket =
+    var socket =
       if (settings.server.value == "") compileSocket.getOrCreateSocket(vmArgs mkString " ", !shutdown)
-      else Some(compileSocket.getSocket(settings.server.value))
+      else compileSocket.getSocket(settings.server.value)
+
+    // Interpret -server localhost:port to start at given port if required.
+    if (socket.isEmpty && !shutdown && settings.server.value.startsWith("localhost:")) {
+      socket = compileSocket.getOrCreateSocket(vmArgs mkString " ", true)
+    }
 
     socket match {
       case Some(sock) => compileOnServer(sock, fscArgs)

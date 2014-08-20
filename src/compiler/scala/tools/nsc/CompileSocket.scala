@@ -45,6 +45,9 @@ trait HasCompileSocket {
 class CompileSocket extends CompileOutputCommon {
   protected lazy val compileClient: StandardCompileClient = CompileClient
   def verbose = compileClient.verbose
+  
+  /* Fixes the port where to start the server, 0 yields some free port */
+  var fixPort = 0
 
   /** The prefix of the port identification file, which is followed
    *  by the port number.
@@ -63,7 +66,9 @@ class CompileSocket extends CompileOutputCommon {
 
   /** The class name of the scala compile server */
   protected val serverClass     = "scala.tools.nsc.CompileServer"
-  protected def serverClassArgs = if (verbose) List("-v") else Nil  // debug
+  protected def serverClassArgs = if (fixPort > 0) {
+    if (verbose) List("-v", "-p", fixPort.toString) else List("-p", fixPort.toString)
+  } else if (verbose) List("-v") else Nil
 
   /** A temporary directory to use */
   val tmpDir = {
@@ -118,7 +123,7 @@ class CompileSocket extends CompileOutputCommon {
     var attempts = 0
     var port = pollPort()
 
-    if (port < 0) {
+    if (port < 0 || fixPort > 0) {
       info("No compile server running: starting one with args '" + vmArgs + "'")
       startNewServer(vmArgs)
     }
@@ -185,14 +190,19 @@ class CompileSocket extends CompileOutputCommon {
     try   { Some(x.toInt) }
     catch { case _: NumberFormatException => None }
 
-  def getSocket(serverAdr: String): Socket = (
-    for ((name, portStr) <- splitWhere(serverAdr, _ == ':', doDropIndex = true) ; port <- parseInt(portStr)) yield
+  def getSocket(serverAdr: String): Option[Socket] = (
+    for ((name, portStr) <- splitWhere(serverAdr, _ == ':', doDropIndex = true) ; port <- parseInt(portStr)) yield {    	
+      fixPort = port
       getSocket(name, port)
+    }
   ) getOrElse fatal("Malformed server address: %s; exiting" format serverAdr)
 
-  def getSocket(hostName: String, port: Int): Socket =
-    Socket(hostName, port).opt getOrElse fatal("Unable to establish connection to server %s:%d; exiting".format(hostName, port))
-
+  def getSocket(hostName: String, port: Int): Option[Socket] = {
+    var sock = Socket(hostName, port).opt
+    if (sock.isEmpty) warn("Unable to establish connection to server %s:%d".format(hostName, port))
+    sock
+  }
+  
   def getPassword(port: Int): String = {
     val ff  = portFile(port)
     val f   = ff.bufferedReader()
