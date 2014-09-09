@@ -45,7 +45,8 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
     with Printers
     with DocComments
     with Positions
-    with Reporting { self =>
+    with Reporting
+    with Parsing { self =>
 
   // the mirror --------------------------------------------------
 
@@ -217,6 +218,14 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
 
   /** Called from parser, which signals hereby that a method definition has been parsed. */
   def signalParseProgress(pos: Position) {}
+
+  /** Called by ScalaDocAnalyzer when a doc comment has been parsed. */
+  def signalParsedDocComment(comment: String, pos: Position) = {
+    // TODO: this is all very borken (only works for scaladoc comments, not regular ones)
+    //       --> add hooks to parser and refactor Interactive global to handle comments directly
+    //       in any case don't use reporter for parser hooks
+    reporter.comment(pos, comment)
+  }
 
   /** Register new context; called for every created context
    */
@@ -395,7 +404,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
       reporter.cancelled || unit.isJava && this.id > maxJavaPhase
     }
 
-    final def applyPhase(unit: CompilationUnit) {
+    final def withCurrentUnit(unit: CompilationUnit)(task: => Unit) {
       if ((unit ne null) && unit.exists)
         lastSeenSourceFile = unit.source
 
@@ -407,7 +416,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
         currentRun.currentUnit = unit
         if (!cancelled(unit)) {
           currentRun.informUnitStarting(this, unit)
-          apply(unit)
+          task
         }
         currentRun.advanceUnit()
       } finally {
@@ -415,6 +424,8 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
         currentRun.currentUnit = unit0
       }
     }
+
+    final def applyPhase(unit: CompilationUnit) = withCurrentUnit(unit)(apply(unit))
   }
 
   // phaseName = "parser"
@@ -968,7 +979,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
 
   /** A Run is a single execution of the compiler on a set of units.
    */
-  class Run extends RunContextApi with RunReporting {
+  class Run extends RunContextApi with RunReporting with RunParsing {
     /** Have been running into too many init order issues with Run
      *  during erroneous conditions.  Moved all these vals up to the
      *  top of the file so at least they're not trivially null.
@@ -1169,7 +1180,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
     val erasurePhase                 = phaseNamed("erasure")
     val posterasurePhase             = phaseNamed("posterasure")
     // val lazyvalsPhase                = phaseNamed("lazyvals")
-    // val lambdaliftPhase              = phaseNamed("lambdalift")
+    val lambdaliftPhase              = phaseNamed("lambdalift")
     // val constructorsPhase            = phaseNamed("constructors")
     val flattenPhase                 = phaseNamed("flatten")
     val mixinPhase                   = phaseNamed("mixin")
@@ -1361,7 +1372,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
           runCheckers()
 
         // output collected statistics
-        if (settings.Ystatistics)
+        if (settings.YstatisticsEnabled)
           statistics.print(phase)
 
         advancePhase()
